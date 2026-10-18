@@ -1,0 +1,8 @@
+flask
+pandas
+openpyxl
+requests
+beautifulsoup4
+lxml
+sqlalchemy
+pbixray

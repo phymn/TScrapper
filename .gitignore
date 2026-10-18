@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.zip
+*.log
+.DS_Store
+# user data / uploads / exports
+*.db
+*.sqlite
+*.sqlite3
+*.pbix
+*.pbit
+*.xlsx
+*.xls
+*.csv
+*.tsv
+scraped_data.*

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Data Scraper</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  // Transformers.js for on-device AI (SmolLM2-135M ~140MB download)
+  // import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2';
+  // We'll load dynamically when user clicks AI Extract
+</script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; }
+  .table-container { max-height: 400px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #334155; padding: 8px; text-align: left; }
+  th { background: #1e293b; position: sticky; top: 0; }
+</style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+<div class="max-w-6xl mx-auto">
+  <h1 class="text-4xl font-bold mb-2 bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">AI Data Scraper</h1>
+  <p class="text-slate-400 mb-6">Scrape websites or upload CSV / XLS / XLSX / JSON / SQLite DB. Intelligent extraction with on-device AI.</p>
+
+  <!-- Input Section -->
+  <div class="grid md:grid-cols-2 gap-6 mb-8">
+    <div class="bg-slate-800/50 p-6 rounded-xl border border-slate-700">
+      <h2 class="text-xl font-semibold mb-4">Website URL</h2>
+      <input id="urlInput" type="url" placeholder="https://example.com/table-page" class="w-full p-3 bg-slate-900 border border-slate-600 rounded-lg mb-3">
+      <button onclick="scrapeUrl()" class="w-full bg-cyan-600 hover:bg-cyan-500 px-4 py-3 rounded-lg font-medium transition">Fetch & Scrape Tables</button>
+    </div>
+    <div class="bg-slate-800/50 p-6 rounded-xl border border-slate-700">
+      <h2 class="text-xl font-semibold mb-4">Upload File</h2>
+      <input id="fileInput" type="file" accept=".csv,.tsv,.xls,.xlsx,.xlsm,.json,.db,.sqlite,.sqlite3,.pbix,.pbit" class="w-full p-3 bg-slate-900 border border-slate-600 rounded-lg mb-3">
+      <button onclick="uploadFile()" class="w-full bg-purple-600 hover:bg-purple-500 px-4 py-3 rounded-lg font-medium transition">Process File</button>
+    </div>
+  </div>
+
+  <div id="status" class="mb-4 text-sm text-cyan-300"></div>
+
+  <!-- Preview & Controls -->
+  <div id="previewSection" class="hidden bg-slate-800/50 p-6 rounded-xl border border-slate-700 mb-6">
+    <h2 class="text-xl font-semibold mb-4">Data Preview</h2>
+    <div id="tableSelect" class="mb-4"></div>
+    <div id="previewTable" class="table-container mb-4"></div>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm mb-1">Select Columns (leave empty for all)</label>
+        <div id="columnChecks" class="flex flex-wrap gap-2 max-h-32 overflow-auto"></div>
+      </div>
+      <div>
+        <label class="block text-sm mb-1">Row Range</label>
+        <div class="flex gap-2">
+          <input id="rowStart" type="number" value="0" min="0" class="w-24 p-2 bg-slate-900 border border-slate-600 rounded">
+          <span class="self-center">to</span>
+          <input id="rowEnd" type="number" placeholder="end" class="w-24 p-2 bg-slate-900 border border-slate-600 rounded">
+        </div>
+      </div>
+    </div>
+    <div class="mt-4">
+      <label class="block text-sm mb-1">What data do you want? (describe columns, filters, or use AI)</label>
+      <textarea id="userQuery" rows="3" placeholder="e.g. Extract product names and prices, or show unique categories, or stats on numeric columns" class="w-full p-3 bg-slate-900 border border-slate-600 rounded-lg"></textarea>
+    </div>
+    <div class="flex flex-wrap gap-3 mt-4 items-center">
+      <button onclick="processData()" class="bg-emerald-600 hover:bg-emerald-500 px-5 py-2 rounded-lg">Filter & Analyze</button>
+      <button onclick="aiExtract()" class="bg-fuchsia-600 hover:bg-fuchsia-500 px-5 py-2 rounded-lg">AI Smart Extract (on-device)</button>
+      <div class="flex items-center gap-2">
+        <label class="text-sm">Save as:</label>
+        <select id="exportFormat" class="p-2 bg-slate-900 border border-slate-600 rounded">
+          <option value="csv">CSV</option>
+          <option value="tsv">TSV</option>
+          <option value="json">JSON</option>
+          <option value="xlsx">XLSX (Excel)</option>
+          <option value="xls">XLS (Excel 97-2003)</option>
+        </select>
+        <button onclick="downloadData()" class="bg-slate-600 hover:bg-slate-500 px-5 py-2 rounded-lg">Download</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Insights -->
+  <div id="insightsSection" class="hidden bg-slate-800/50 p-6 rounded-xl border border-slate-700">
+    <h2 class="text-xl font-semibold mb-4">Insights & Cool Data</h2>
+    <div id="insightsContent"></div>
+  </div>
+
+  <div id="aiStatus" class="mt-4 text-sm text-fuchsia-300"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+let currentData = [];
+let currentColumns = [];
+let extractionPipeline = null;
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function setAIStatus(msg) { document.getElementById('aiStatus').textContent = msg; }
+
+async function scrapeUrl() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) return setStatus('Enter a URL');
+  setStatus('Fetching and scraping...');
+  try {
+    const res = await fetch('/scrape', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url})
+    });
+    const data = await res.json();
+    if (data.error) return setStatus('Error: ' + data.error);
+    if (data.tables && data.tables.length) {
+      showTables(data.tables);
+      setStatus(`Found ${data.tables.length} table(s)`);
+    } else {
+      setStatus(data.message || 'No tables found. Text preview available. Try AI extract on raw content.');
+      // Could store text for AI
+      currentData = [{raw_text: data.text_preview}];
+      currentColumns = ['raw_text'];
+      showPreview();
+    }
+  } catch (e) { setStatus('Network error: ' + e.message); }
+}
+
+async function uploadFile() {
+  const file = document.getElementById('fileInput').files[0];
+  if (!file) return setStatus('Select a file');
+  setStatus('Processing file...');
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const res = await fetch('/upload', {method: 'POST', body: form});
+    const data = await res.json();
+    if (data.error) return setStatus('Error: ' + data.error);
+    if (data.type === 'tabular' || data.type === 'excel') {
+      if (data.sheets) {
+        // Handle multiple sheets - pick first for now, or show selector
+        const first = Object.keys(data.sheets)[0];
+        currentData = data.sheets[first].data;
+        currentColumns = data.sheets[first].columns;
+        setStatus(`Loaded sheet: ${first} (${data.sheets[first].total_rows} rows)`);
+      } else {
+        currentData = data.data;
+        currentColumns = data.columns;
+        setStatus(`Loaded ${data.total_rows} rows`);
+      }
+      showPreview();
+    } else if (data.type === 'db') {
+      const first = Object.keys(data.tables)[0];
+      currentData = data.tables[first].data;
+      currentColumns = data.tables[first].columns;
+      setStatus(`Loaded DB table: ${first}`);
+      showPreview();
+    } else if (data.type === 'pbix') {
+      const tables = Object.keys(data.tables);
+      if (tables.length) {
+        const first = tables[0];
+        currentData = data.tables[first].data || [];
+        currentColumns = data.tables[first].columns || [];
+        let meta = '';
+        if (data.metadata) {
+          meta = ` | Measures: ${data.metadata.measures_count || 0}, Relationships: ${data.metadata.relationships_count || 0}`;
+        }
+        setStatus(`Loaded Power BI model. Tables: ${tables.join(', ')}${meta}`);
+        // Store all tables for selector if needed
+        window._pbixTables = data.tables;
+        showPreview();
+      } else {
+        setStatus('Power BI file loaded but no extractable tables found.');
+      }
+    } else {
+      setStatus('Loaded JSON/raw data');
+      currentData = [{data: JSON.stringify(data.raw || data)}];
+      currentColumns = ['data'];
+      showPreview();
+    }
+  } catch (e) { setStatus('Upload error: ' + e.message); }
+}
+
+function showTables(tables) {
+  const sel = document.getElementById('tableSelect');
+  sel.innerHTML = tables.map((t, i) => `<button onclick="selectTable(${i})" class="mr-2 mb-2 px-3 py-1 bg-slate-700 rounded">Table ${i} (${t.total_rows} rows)</button>`).join('');
+  window._tables = tables;
+  selectTable(0);
+}
+
+function selectTable(i) {
+  const t = window._tables[i];
+  currentData = t.data;
+  currentColumns = t.columns;
+  showPreview();
+}
+
+function showPreview() {
+  document.getElementById('previewSection').classList.remove('hidden');
+  const colsDiv = document.getElementById('columnChecks');
+  colsDiv.innerHTML = currentColumns.map(c => `<label class="flex items-center gap-1 text-sm"><input type="checkbox" value="${c}" checked class="col-check"> ${c}</label>`).join('');
+  renderTable(currentData.slice(0, 20), currentColumns);
+}
+
+function renderTable(rows, cols) {
+  if (!rows.length) return;
+  const html = `<table><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r => `<tr>${cols.map(c => `<td>${r[c] ?? ''}</td>`).join('')}</tr>`).join('')}
+  </tbody></table>`;
+  document.getElementById('previewTable').innerHTML = html;
+}
+
+async function processData() {
+  const selected = [...document.querySelectorAll('.col-check:checked')].map(el => el.value);
+  const start = parseInt(document.getElementById('rowStart').value) || 0;
+  const end = document.getElementById('rowEnd').value ? parseInt(document.getElementById('rowEnd').value) : null;
+  const query = document.getElementById('userQuery').value;
+  setStatus('Processing...');
+  const res = await fetch('/process', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({data: currentData, columns: selected.length ? selected : null, row_start: start, row_end: end, query})
+  });
+  const result = await res.json();
+  if (result.error) return setStatus(result.error);
+  currentData = result.data;
+  currentColumns = result.columns;
+  renderTable(result.data.slice(0, 50), result.columns);
+  showInsights(result);
+  setStatus(`Filtered to ${result.total_filtered} rows`);
+}
+
+function showInsights(result) {
+  const sec = document.getElementById('insightsSection');
+  sec.classList.remove('hidden');
+  let html = '<div class="grid md:grid-cols-2 gap-4">';
+  if (result.insights.stats) {
+    html += `<div><h3 class="font-medium mb-2">Numeric Stats</h3><pre class="text-xs bg-slate-900 p-2 rounded overflow-auto">${JSON.stringify(result.insights.stats, null, 2)}</pre></div>`;
+  }
+  html += `<div><h3 class="font-medium mb-2">Unique Counts</h3><ul class="text-sm">${Object.entries(result.insights.unique_counts || {}).map(([k,v]) => `<li>${k}: ${v}</li>`).join('')}</ul></div>`;
+  html += `<div class="md:col-span-2"><h3 class="font-medium mb-2">Suggestions</h3><ul class="text-sm list-disc pl-5">${(result.suggestions || []).map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+  html += '</div>';
+  document.getElementById('insightsContent').innerHTML = html;
+}
+
+async function aiExtract() {
+  const query = document.getElementById('userQuery').value || 'Extract key information as structured data';
+  setAIStatus('Loading on-device AI model (SmolLM2-135M, ~140MB first time)...');
+  try {
+    if (!extractionPipeline) {
+      const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.1.2');
+      extractionPipeline = await pipeline('text-generation', 'HuggingFaceTB/SmolLM2-135M-Instruct', {
+        dtype: 'q4',
+        device: 'webgpu' in navigator ? 'webgpu' : 'wasm'
+      });
+    }
+    setAIStatus('Model loaded. Running extraction...');
+    const dataText = JSON.stringify(currentData.slice(0, 30)); // Limit for context
+    const prompt = `You are a data extraction assistant. From the following tabular data, ${query}. Output ONLY valid JSON array of objects with relevant fields.\n\nData:\n${dataText}`;
+    const out = await extractionPipeline(prompt, { max_new_tokens: 512, temperature: 0.1 });
+    const generated = out[0].generated_text;
+    // Try to parse JSON from response
+    const match = generated.match(/\[.*\]/s);
+    if (match) {
+      const extracted = JSON.parse(match[0]);
+      currentData = extracted;
+      currentColumns = Object.keys(extracted[0] || {});
+      renderTable(extracted.slice(0, 50), currentColumns);
+      setAIStatus('AI extraction complete! Data updated.');
+    } else {
+      setAIStatus('AI response: ' + generated.slice(0, 500) + '...');
+    }
+  } catch (e) {
+    setAIStatus('AI error (model may be large or browser unsupported): ' + e.message + '. Falling back to heuristic.');
+    // Fallback: just process
+    processData();
+  }
+}
+
+function downloadData() {
+  if (!currentData.length) {
+    setStatus('No data to download');
+    return;
+  }
+  const format = document.getElementById('exportFormat').value;
+  const cols = currentColumns;
+  const filename = 'scraped_data';
+
+  if (format === 'csv' || format === 'tsv') {
+    const sep = format === 'tsv' ? '\t' : ',';
+    const rows = [cols.join(sep)].concat(
+      currentData.map(r => cols.map(c => {
+        let val = (r[c] ?? '').toString();
+        if (format === 'csv') val = `"${val.replace(/"/g, '""')}"`;
+        return val;
+      }).join(sep))
+    );
+    const blob = new Blob([rows.join('\n')], {type: format === 'tsv' ? 'text/tab-separated-values' : 'text/csv'});
+    triggerDownload(blob, `${filename}.${format}`);
+  } else if (format === 'json') {
+    const blob = new Blob([JSON.stringify(currentData, null, 2)], {type: 'application/json'});
+    triggerDownload(blob, `${filename}.json`);
+  } else if (format === 'xlsx' || format === 'xls') {
+    const ws = XLSX.utils.json_to_sheet(currentData, {header: cols});
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Data');
+    const bookType = format === 'xls' ? 'xls' : 'xlsx';
+    XLSX.writeFile(wb, `${filename}.${format}`, {bookType: bookType});
+  }
+  setStatus(`Downloaded as ${format.toUpperCase()}`);
+}
+
+function triggerDownload(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Keep old function for compatibility if referenced
+function downloadCSV() { document.getElementById('exportFormat').value = 'csv'; downloadData(); }
+</script>
+</body>
+</html>
